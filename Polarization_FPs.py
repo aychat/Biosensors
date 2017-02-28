@@ -28,16 +28,7 @@ class PolarizationFP:
         self.exp_lineshape_plus = np.zeros(self.t_plus.size, dtype='complex')
         self.g = np.zeros_like(self.exp_lineshape_plus)
         self.absorption_hilbert = np.zeros_like(self.absorption)
-
-    @staticmethod
-    def fourier_1(data_time):
-        j = (-1)**np.arange(len(data_time))
-        return j*np.fft.fft(j*data_time)
-
-    @staticmethod
-    def inverse_fourier_1(data_freq):
-        j = (-1)**np.arange(len(data_freq))
-        return j*np.fft.ifft(j*data_freq)
+        self.absorption_getback = np.zeros_like(self.absorption)
 
     def spectra2lineshape(self):
 
@@ -52,7 +43,7 @@ class PolarizationFP:
         interpolation_function = interp1d(freq_w2f, absorption_freq_w2f, kind='cubic')
         d_freq = (freq_w2f[1] - freq_w2f[0]) / self.interpolate_num
         self.freq = np.linspace(freq_w2f[0], freq_w2f[-1] - d_freq, self.interpolate_num)
-        self. absorption = interpolation_function(self.freq)
+        self.absorption = interpolation_function(self.freq)
 
         # --------------------------------------------------------------------------- #
         # A(|omega|) = RE[\int_-inf+inf e^(-g(t)) \theta(t)  e^(-i \omega t)]         #
@@ -68,6 +59,8 @@ class PolarizationFP:
             "Absorption interpolation error bounds crossed"
 
         self.absorption_hilbert = hilbert(self.absorption)
+        assert any(self.absorption_hilbert.real - self.absorption == 0.0)
+
         self.freq_0 = (self.freq[0] + self.freq[-1]) / 2
         self.freq_shift = self.freq - self.freq_0
         self.t = np.fft.fftshift(np.fft.fftfreq(len(self.freq_shift), self.freq_shift[1] - self.freq_shift[0]))
@@ -77,12 +70,6 @@ class PolarizationFP:
         self.exp_lineshape_plus = self.exp_lineshape[:self.exp_lineshape.size / 2 + 1]
 
         self.g = np.log(self.exp_lineshape_plus)
-
-        plt.figure()
-        plt.subplot(211)
-        plt.plot(self.t_plus, self.g.real, 'r')
-        plt.subplot(212)
-        plt.plot(self.t_plus, self.g.imag, 'b')
 
         return 0
 
@@ -95,14 +82,30 @@ class PolarizationFP:
 
         assert norm(exp_lineshape_l2s - self.exp_lineshape, 1) < 1e-6, "The exp-lineshape does not match"
 
-        absorption_getback = self.fourier_1(exp_lineshape_l2s * np.exp(-1j * self.freq_0 * self.t))
+        self.absorption_getback = self.fourier_1(exp_lineshape_l2s * np.exp(-1j * self.freq_0 * self.t))
 
-        assert norm(absorption_getback - self.absorption_hilbert) < 1e-6, "Original spectra not reproduced"
+        assert norm(self.absorption_getback - self.absorption_hilbert) < 1e-6, "Original spectra not reproduced"
 
         return 0
 
-    def __call__(self, parameters):
 
+class TransformType1(PolarizationFP):
+    """
+    Calculation of polarization from absorption spectra using lineshape functions
+    """
+
+    def __init__(self, **kwargs):
+        PolarizationFP.__init__(self, **kwargs)
+
+    def fourier_1(self, data_time):
+        j = (-1) ** np.arange(len(data_time))
+        return j * np.fft.fft(j * data_time)
+
+    def inverse_fourier_1(self, data_freq):
+        j = (-1) ** np.arange(len(data_freq))
+        return j * np.fft.ifft(j * data_freq)
+
+    def __call__(self, parameters):
         # --------------------------------------------------------------------------- #
         # ----------CHECKING THAT FFT OF IFFT GIVES BACK THE ORIGINAL DATA----------- #
         # --------------------------------------------------------------------------- #
@@ -113,13 +116,29 @@ class PolarizationFP:
 
         self.spectra2lineshape()
         self.lineshape2spectra()
+
+        plt.figure()
+        plt.suptitle('Lineshape function: Real and Imaginary parts')
+        plt.subplot(211)
+        plt.plot(self.t_plus, self.g.real, 'r*-', label='Real lineshape')
+        plt.legend()
+        plt.subplot(212)
+        plt.plot(self.t_plus, self.g.imag, 'bo-', label='Imaginary lineshape')
+        plt.legend()
+
+        plt.figure()
+        plt.suptitle('Reproducing original lineshape function from lineshape function')
+        plt.plot(self.t, self.absorption, 'k*', label='Original spectra')
+        plt.plot(self.t, self.absorption_getback.real, 'b', label='Spectra from lineshape')
+        plt.legend()
         plt.show()
         return 0
+
 
 if __name__ == '__main__':
     print(PolarizationFP.__doc__)
 
-    PolarizationFP(
+    TransformType1(
         # kwargs
         filename="Data/tag_RFP_abs.txt",
         interpolate_num=256
